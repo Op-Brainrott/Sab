@@ -244,6 +244,9 @@ local function execSteal(prompt)
     prompt.HoldDuration = prev
 end
 
+local cachedTarget = nil
+local lastTargetRefresh = 0
+
 local function nearestAnimal()
     local hrp = getHRP()
     if not hrp then return nil end
@@ -272,22 +275,45 @@ local function startStealLoop()
     stealConn = true
     task.spawn(function()
         while stealConn do
-            task.wait()
-            if not stealActive then continue end
-            local target = nearestAnimal()
-            if not target then SetBarState(false) continue end
-            local hrp = getHRP()
-            if not hrp then SetBarState(false) continue end
-            local dist = (hrp.Position - target.worldPosition).Magnitude
-            local inRadius = dist <= cfg.StealRadius
-            SetBarState(inRadius)
-            if not inRadius then continue end
-            local prompt = target.prompt
-            if not prompt or not prompt.Parent then
-                prompt = getPromptFromPod(getPodFromTarget(target))
-                if prompt then target.prompt = prompt end
+            task.wait(0.05)
+
+            if not stealActive then
+                SetBarState(false)
+            else
+                local now = tick()
+
+                if not cachedTarget or (now - lastTargetRefresh) >= 0.5 then
+                    cachedTarget = nearestAnimal()
+                    lastTargetRefresh = now
+                end
+
+                local target = cachedTarget
+                if not target then
+                    SetBarState(false)
+                else
+                    local hrp = getHRP()
+                    if not hrp then
+                        SetBarState(false)
+                    else
+                        local dist = (hrp.Position - target.worldPosition).Magnitude
+                        local inRadius = dist <= cfg.StealRadius
+                        SetBarState(inRadius)
+
+                        if inRadius then
+                            local prompt = target.prompt
+                            if not prompt or not prompt.Parent then
+                                prompt = getPromptFromPod(getPodFromTarget(target))
+                                if prompt then
+                                    target.prompt = prompt
+                                else
+                                    cachedTarget = nil
+                                end
+                            end
+                            if prompt then execSteal(prompt) end
+                        end
+                    end
+                end
             end
-            if prompt then execSteal(prompt) end
         end
     end)
 end
@@ -295,6 +321,7 @@ end
 local function scanAllPlots()
     animalCache = {}
     myBasePlotNames = {}
+    cachedTarget = nil
     local plots = Workspace:FindFirstChild("Plots")
     if not plots then return end
     for _, plot in ipairs(plots:GetChildren()) do
